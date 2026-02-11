@@ -23,10 +23,11 @@ Route::get('/google/callback',[AuthController::class, 'handleGoogleCallback'])->
 });
 
 Route::middleware('auth:sanctum')->group(function () {
-    Route::get('/auth/logout', [AuthController::class, 'logout']);
+    Route::post ('/auth/logout', [AuthController::class, 'logout']);
    Route::prefix('posts')->group(function () {
        Route::get('/', [PostController::class, 'index']);
        Route::post('/', [PostController::class, 'store']);
+       Route::get('/{slug}', [PostController::class, 'show']);
        Route::post('/{content}/answers', [PostController::class, 'addAnswer']);
        Route::get('/{content}/answers', [PostController::class, 'showAllAnswers']);
        Route::post('/{content}/reactions', [PostController::class, 'addReaction']);

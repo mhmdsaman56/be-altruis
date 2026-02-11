@@ -13,7 +13,7 @@ class PostController extends Controller
 {
     public function index(Request $request)
     {
-        $posts = Content::select('id', 'body', 'user_id', 'created_at')->where('content_type', 'post')->with('reactions')->orderBy('created_at', 'desc')->get();
+        $posts = Content::select('id', 'content_type','body', 'user_id', 'created_at')->where('content_type', 'post')->with('reactions')->orderBy('created_at', 'desc')->get();
         $template = [
             'like',
             'dislike',
@@ -114,13 +114,16 @@ class PostController extends Controller
 
     public function addAnswer(Request $request, Content $content)
     {
+
         $validated = $request->validate([
             'body' => 'required|string',
+            'content_type' => 'nullable|in:post,answer,comment,article ',
         ]);
+        $validated['content_type'] = $validated['content_type'] ?? 'answer';
         try {
-            $answer = $content->answers()->create([
+            $answer = $content->children()->create([
                 'body' => $validated['body'],
-                'content_type' => 'answer',
+                'content_type' => $validated['content_type'],
                 'user_id' => $request->user()->id,
                 'parent_id' => $content->id,
                 'slug' =>  Str::slug( 'answer-' . uniqid()),
@@ -132,13 +135,9 @@ class PostController extends Controller
     }
     public function showAllAnswers(Content $content)
     {
-        // try {
-            //     return response()->json(['message' => 'Answers retrieved successfully', 'payload' => $answers], 200);
-            // } catch (\Throwable $th) {
-                //     return response()->json(['message' => 'Failed to retrieve answers', 'error' => $th->getMessage()], 500);
-                // }
+   
                 
-                $answers = $content->answers()->with('user:id,name', 'reactions')->get();
+                $answers = $content->children()->with('user:id,name', 'reactions')->get();
         $template = [
             'like',
             'dislike',
@@ -164,5 +163,11 @@ class PostController extends Controller
 
 
         return response()->json(['message' => 'List of answers', 'payload' => $answers], 200);
+    }
+
+    public function show(string $slug)
+    {
+         $content = Content::with('parent', 'children', 'reactions')->where('slug', $slug)->firstOrFail();
+        return response()->json(['message' => 'Content found', 'payload' => $content ], 200);
     }
 }

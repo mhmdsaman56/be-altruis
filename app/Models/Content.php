@@ -25,10 +25,14 @@ class Content extends Model
         return $this->hasMany(Reaction::class);
     }
 
-    public function answers()
+    public function children( )
     {
-        return $this->hasMany(Content::class, 'parent_id')->where('content_type', 'answer');
+        return $this->hasMany(Content::class, 'parent_id');
     }
 
+    public function parent()
+    {
+        return $this->belongsTo(Content::class, 'parent_id');
+    }
 
 }
