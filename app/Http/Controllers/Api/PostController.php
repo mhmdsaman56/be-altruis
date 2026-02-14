@@ -5,8 +5,10 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\CreatePostRequest;
 use App\Models\Content;
+use App\Models\Notification;
 use App\Models\Reaction;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class PostController extends Controller
@@ -44,12 +46,14 @@ class PostController extends Controller
     {
 
         $validated = $request->validated();
+        
         try {
             $post = Content::create([
                 'content_type' => 'post',
                 'body' => $validated['body'],
                 'user_id' => $request->user()->id,
             ]);
+
             return response()->json(['message' => 'Post created successfully', 'payload' => [
                 'id' => $post->id,
                 'body' => $post->body,
@@ -63,54 +67,82 @@ class PostController extends Controller
     }
 
     public function addReaction(Request $request, Content $content)
-    {
-        $validated = $request->validate([
-            'type' => 'required|in:like,dislike,agree,disagree,helpful,unhelpful,upvote,downvote',
-        ]);
-        $opposites = [
-            'like'     => 'dislike',
-            'dislike'  => 'like',
-            'agree'    => 'disagree',
-            'disagree' => 'agree',
-            'helpful'   => 'unhelpful',
-            'unhelpful' => 'helpful',
-            'upvote'   => 'downvote',
-            'downvote' => 'upvote',
-        ];
-        try {
-            $exactReaction = Reaction::where('content_id', $content->id)
-                ->where('user_id', $request->user()->id)
-                ->where('type', $validated['type'])
-                ->first();
+{
+    $validated = $request->validate([
+        'type' => 'required|in:like,dislike,agree,disagree,helpful,unhelpful,upvote,downvote',
+    ]);
 
-            if ($exactReaction) {
-                $exactReaction->delete();
-                return response()->json(['message' => 'Removed', 'payload' => null]);
-            }
-            $oppositeReaction = Reaction::where('content_id', $content->id)
-                ->where('user_id', $request->user()->id)
-                ->where('type', $opposites[$validated['type']])
-                ->first();
+    $opposites = [
+        'like' => 'dislike',
+        'dislike' => 'like',
+        'agree' => 'disagree',
+        'disagree' => 'agree',
+        'helpful' => 'unhelpful',
+        'unhelpful' => 'helpful',
+        'upvote' => 'downvote',
+        'downvote' => 'upvote',
+    ];
 
-            if ($oppositeReaction) {
-                $oppositeReaction->update(
-                    ['type' => $validated['type']]
-                );
+    return DB::transaction(function () use ($request, $content, $validated, $opposites) {
 
-                return response()->json(['message' => 'Reaction updated successfully'], 200);
-            }
-            $newReaction = Reaction::create([
-                'content_id' => $content->id,
+        $userId = $request->user()->id;
 
-                'user_id' => $request->user()->id,
-                'type' => $validated['type'],
+        $exactReaction = Reaction::where([
+            'content_id' => $content->id,
+            'user_id' => $userId,
+            'type' => $validated['type']
+        ])->first();
+
+        if ($exactReaction) {
+            $exactReaction->delete();
+            return response()->json(['message' => 'Removed']);
+        }
+
+        $oppositeReaction = Reaction::where([
+            'content_id' => $content->id,
+            'user_id' => $userId,
+            'type' => $opposites[$validated['type']]
+        ])->first();
+
+        if ($oppositeReaction) {
+            $oppositeReaction->update([
+                'type' => $validated['type']
+            ]);
+            Notification::create([
+                'user_id' => $content->user_id,
+                'type' => 'reaction_switch',
+                'data' => json_encode([
+                    'actor' => $request->user()->name,
+                    'content_id' => $content->id,
+                    'new_reaction' => $validated['type'],
+                ]),
             ]);
 
-            return response()->json(['message' => 'Reaction added successfully', 'payload' => $newReaction], 201);
-        } catch (\Throwable $th) {
-            return response()->json(['message' => 'Failed to add reaction', 'error' => $th->getMessage()], 500);
+            return response()->json(['message' => 'Reaction switched']);
         }
-    }
+
+        $newReaction = Reaction::create([
+            'content_id' => $content->id,
+            'user_id' => $userId,
+            'type' => $validated['type'],
+        ]);
+
+        Notification::create([
+            'user_id' => $content->user_id,
+            'type' => 'reaction',
+            'data' => json_encode([
+                'actor' => $request->user()->name,
+                'content_id' => $content->id,
+                'reaction' => $validated['type'],
+            ]),
+        ]);
+        return response()->json([
+            'message' => 'Added',
+            'payload' => $newReaction
+        ], 201);
+    });
+}
+
 
     public function addAnswer(Request $request, Content $content)
     {
@@ -120,6 +152,7 @@ class PostController extends Controller
             'content_type' => 'nullable|in:post,answer,comment,article ',
         ]);
         $validated['content_type'] = $validated['content_type'] ?? 'answer';
+        DB::beginTransaction();
         try {
             $answer = $content->children()->create([
                 'body' => $validated['body'],
@@ -128,34 +161,31 @@ class PostController extends Controller
                 'parent_id' => $content->id,
                 'slug' =>  Str::slug( 'answer-' . uniqid()),
             ]);
+            Notification::create([
+                'user_id' => $content->user_id,
+                'type' => 'answer',
+                'data' => json_encode([
+                    'actor' => $request->user()->name,
+                    'post_id' => $content->id,
+                    'answer_id' => $answer->id,
+                    'post_body' => Str::limit($content->body, 50),
+                ]),
+            ]);
+            DB::commit();
             return response()->json(['message' => 'Answer added successfully', 'payload' => $answer], 201);
         } catch (\Throwable $th) {
+            DB::rollBack();
             return response()->json(['message' => 'Failed to add answer', 'error' => $th->getMessage()], 500);
         }
     }
-    public function showAllAnswers(Content $content)
+    public function showAllAnswers(Request $request,    Content $content)
     {
    
                 
                 $answers = $content->children()->with('user:id,name', 'reactions')->get();
-        $template = [
-            'like',
-            'dislike',
-            'helpful',
-            'unhelpful',
-            'agree',
-            'disagree',
-            'upvote',
-            'downvote'
-        ];
+      
         foreach ($answers as $answer) {
-            $answer->reaction_summary = collect($template)->map(function ($type) use ($answer, $content) {
-                return [
-                    'type' => $type,
-                    'count' => $answer->reactions->where('type', $type)->count(),
-                    'is_active' => $answer->reactions->where('type', $type)->where('user_id', $content->user_id)->isNotEmpty(),
-                ];
-            });
+            $answer->reaction_summary = $this->getReactionSummary($answer,  $request->user()->id);
             unset($answer->reactions);
         }
 
@@ -165,9 +195,47 @@ class PostController extends Controller
         return response()->json(['message' => 'List of answers', 'payload' => $answers], 200);
     }
 
-    public function show(string $slug)
+    public function show(Request $request, string $slug)
     {
-         $content = Content::with('parent', 'children', 'reactions')->where('slug', $slug)->firstOrFail();
-        return response()->json(['message' => 'Content found', 'payload' => $content ], 200);
+         $content = Content::with('parent.reactions', 'children', 'reactions')->where('slug', $slug)->firstOrFail();
+
+        
+        return response()->json(['message' => 'Content found', 'payload' => [
+            'id' => $content->parent->id,
+            'body' => $content->parent->body,
+            'reaction_summary' => $this->getReactionSummary($content->parent, $request->user()->id),
+            'above_answers' => [],
+            'primary_answer'=> [
+                'id' => $content->id,
+                'body' => $content->body,
+                'slug' => $content->slug,
+                'user' => [
+                    'id' => $content->user->id,
+                    'name' => $content->user->name,
+                ],
+                'reaction_summary' => $this->getReactionSummary($content, $request->user()->id)],
+            'below_answers' => [],
+            ]], 200);
+    }
+
+    public function getReactionSummary($data, $user_id){
+           $template = [
+            'like',
+            'dislike',
+            'helpful',
+            'unhelpful',
+            'agree',
+            'disagree',
+            'upvote',
+            'downvote'
+        ];
+            return collect($template)->map(function ($type) use ($data, $user_id) {
+                return [
+                    'type' => $type,
+                    'count' => $data->reactions->where('type', $type)->count(),
+                    'is_active' => $data->reactions->where('type', $type)->where('user_id', $user_id)->isNotEmpty(),
+                ];
+            });
+
     }
 }

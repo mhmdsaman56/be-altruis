@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\CreateArticleRequest;
-use App\Models\Article;
 use App\Models\Content;
 
 use Illuminate\Support\Str;
@@ -40,6 +39,7 @@ class ArticleController extends Controller
                 'title' => $validated['title'],
                 'slug' => Str::slug($validated['title']) . '-' . uniqid(),
                 'body' => $validated['content'],
+                'is_publish' => true,
                 'user_id' => $request->user()->id,
             ]);
             return response()->json(['message' => 'Article created successfully', 'payload' => $article], 201);

@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
+use Google_Client;
 
 
 
@@ -25,8 +26,8 @@ class AuthController extends Controller
                 'message' => 'Invalid credentials',
             ], 401);
         }
-          $token = $user->createToken('auth_token')->plainTextToken;
-               return response()->json([
+        $token = $user->createToken('auth_token')->plainTextToken;
+        return response()->json([
             'message' => 'Login successful',
             'payload' => [
                 'user' => $user,
@@ -48,12 +49,12 @@ class AuthController extends Controller
                     'password' => Hash::make($validated['password']),
                 ]
             );
-             $token = $user->createToken('auth_token')->plainTextToken;
+            $token = $user->createToken('auth_token')->plainTextToken;
             return response()->json([
                 'message' => 'User registered successfully',
                 'payload' => [
                     'user' => $user,
-                       'access_token' => $token,
+                    'access_token' => $token,
                     'token_type' => 'Bearer',
                 ],
             ], 201);
@@ -64,37 +65,36 @@ class AuthController extends Controller
                 'error' => $th->getMessage(),
             ], 500);
         }
-
-
-        
     }
 
     public function logout(Request $request)
     {
 
-    
+
         $request->user()->currentAccessToken()->delete();
         return response()->json([
             'message' => 'Logged out successfully',
         ]);
     }
-      public function redirectToGoogle(){
-        return Socialite::driver('google')->stateless()->user();;
-    }
-    public function handleGoogleCallback(){
-        $googleUser = Socialite::driver('google')->user();
-        
-        $user = User::firstOrCreate(
-            ['email' => $googleUser->getEmail()],
-            [
-                'name' => $googleUser->getName(),
-                'email' => $googleUser->getEmail(),
-                'password' => bcrypt(Str::random(32)),
-            ]
-        );
-        
-        $token = $user->createToken('auth_token')->plainTextToken;
 
+
+    public function loginWithGoogle(Request $request)
+    {
+        try {
+
+            $client = new Google_Client([
+                'client_id' => env('GOOGLE_CLIENT_ID'),
+            ]);
+
+        $payload = $client->verifyIdToken($request->token);
+        if (!$payload) {
+            return response()->json(['message' => 'Invalid token'], 401);
+        }
+        $user = User::firstOrCreate(
+            ['email' => $payload['email']],
+            ['name' => $payload['name'], 'password' => Hash::make(Str::random(32))]
+        );
+        $token = $user->createToken('auth_token')->plainTextToken;
         return response()->json([
             'message' => 'Login successful',
             'payload' => [
@@ -103,6 +103,10 @@ class AuthController extends Controller
                 'token_type' => 'Bearer',
             ],
         ]);
+        }catch (\Throwable $th) {
+            //throw $th;
+            return response()->json(['message' => 'Google login failed', 'error' => $th->getMessage()], 500);
+        }
+
     }
-    
 }

@@ -10,6 +10,7 @@ class Content extends Model
         'user_id',
         'title',
         'content_type', // post, answer, comment, article
+        'is_publish',
         'body',
         'parent_id', // for nested comments or answers
         'slug',

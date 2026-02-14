@@ -16,10 +16,9 @@ Route::get('/ping', function () {
 });
 
 Route::prefix('auth')->group(function () {
-   Route::post('/login', [AuthController::class, 'login']); 
-Route::post('/register', [AuthController::class, 'register']);
-Route::get('/google/redirect',[AuthController::class, 'redirectToGoogle'])->name('google.redirect');
-Route::get('/google/callback',[AuthController::class, 'handleGoogleCallback'])->name('google.callback');
+    Route::post('/login', [AuthController::class, 'login']); 
+    Route::post('/register', [AuthController::class, 'register']);
+    Route::post('/google', [AuthController::class, 'loginWithGoogle']);
 });
 
 Route::middleware('auth:sanctum')->group(function () {
@@ -39,4 +38,9 @@ Route::middleware('auth:sanctum')->group(function () {
        Route::get('/{slug}', [ArticleController::class, 'show']);
    });
 
+
+   Route::prefix('notifications')->group(function () {
+       Route::get('/', [\App\Http\Controllers\Api\NotificationController::class, 'index']);
+
+   });
 });
