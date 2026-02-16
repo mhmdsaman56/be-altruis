@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\CreatePostRequest;
+use App\Models\Activity;
 use App\Models\Content;
 use App\Models\Notification;
 use App\Models\Reaction;
@@ -15,7 +16,9 @@ class PostController extends Controller
 {
     public function index(Request $request)
     {
-        $posts = Content::select('id', 'content_type','body', 'user_id', 'created_at')->where('content_type', 'post')->with('reactions')->orderBy('created_at', 'desc')->get();
+        $posts = Content::select('id', 'content_type','body', 'user_id', 'created_at')->where('content_type', 'post')->with('reactions')
+        ->where('user_id','!=', $request->user()->id)
+        ->orderBy('created_at', 'desc')->get();
         $template = [
             'like',
             'dislike',
@@ -95,6 +98,15 @@ class PostController extends Controller
 
         if ($exactReaction) {
             $exactReaction->delete();
+            Activity::where('user_id', $request->user()->id)
+                ->where('content_id', $content->id)
+                ->where('interaction_type', 'reaction')
+                ->where('reaction_type', $validated['type'])
+                ->delete();
+             Notification::where('user_id', $content->user_id)
+                ->where('content_id', $content->id)
+                ->where('reaction_type', $validated['type'])
+                ->delete();
             return response()->json(['message' => 'Removed']);
         }
 
@@ -103,6 +115,11 @@ class PostController extends Controller
             'user_id' => $userId,
             'type' => $opposites[$validated['type']]
         ])->first();
+                    if ($content->content_type === 'post') {
+                $notificationType = 'question';
+            } else {
+                $notificationType = 'answer';
+            }
 
         if ($oppositeReaction) {
             $oppositeReaction->update([
@@ -110,14 +127,29 @@ class PostController extends Controller
             ]);
             Notification::create([
                 'user_id' => $content->user_id,
-                'type' => 'reaction_switch',
-                'data' => json_encode([
+                'type' => $notificationType,
+                'interaction_type' => 'reaction',
+                'reaction_type' => $validated['type'],
+                'data' => [
                     'actor' => $request->user()->name,
                     'content_id' => $content->id,
-                    'new_reaction' => $validated['type'],
-                ]),
+                    'content_body' => Str::limit($content->body, 120),
+                    
+                ],
             ]);
-
+            Activity::create([
+                'user_id' => $request->user()->id,
+                'type' => $notificationType,
+                'interaction_type' => 'reaction',
+                'reaction_type' => $validated['type'],
+                'content_id' => $content->id,
+                
+                'data' => [
+                    'actor' => $request->user()->name,
+                    'content_body' => Str::limit($content->body, 120),
+                    
+                ],
+            ]);
             return response()->json(['message' => 'Reaction switched']);
         }
 
@@ -129,12 +161,26 @@ class PostController extends Controller
 
         Notification::create([
             'user_id' => $content->user_id,
-            'type' => 'reaction',
-            'data' => json_encode([
+            'type' => $notificationType,
+            'interaction_type' => 'reaction',
+            'reaction_type' => $validated['type'],
+            'data' => [
                 'actor' => $request->user()->name,
                 'content_id' => $content->id,
-                'reaction' => $validated['type'],
-            ]),
+                'content_body' => Str::limit($content->body, 120),  
+            ],
+        ]);
+        Activity::create([
+            'user_id' => $request->user()->id,
+            'type' => $notificationType,
+            'interaction_type' => 'reaction',
+            'reaction_type' => $validated['type'],
+            'content_id' => $content->id,
+            'data' => [
+                'actor' => $request->user()->name,
+                'content_body' => Str::limit($content->body, 120),
+                
+            ],
         ]);
         return response()->json([
             'message' => 'Added',
@@ -161,16 +207,53 @@ class PostController extends Controller
                 'parent_id' => $content->id,
                 'slug' =>  Str::slug( 'answer-' . uniqid()),
             ]);
-            Notification::create([
-                'user_id' => $content->user_id,
-                'type' => 'answer',
-                'data' => json_encode([
-                    'actor' => $request->user()->name,
-                    'post_id' => $content->id,
-                    'answer_id' => $answer->id,
-                    'post_body' => Str::limit($content->body, 50),
-                ]),
-            ]);
+            if ($answer->content_type === 'answer') {
+                Notification::create([
+                    'user_id' => $content->user_id,
+                    'type' => 'question',
+                    'interaction_type' => 'answer',
+                    'data' => [
+                        'actor' => $request->user()->name,
+                        'content_id' => $answer->id,
+                        'content_body' => Str::limit($answer->body, 120),
+                    ],
+                ]);
+                Activity::create([
+                    'user_id' => $request->user()->id,
+                    'type' => 'question',
+                    'interaction_type' => 'answer',
+                    'content_id' => $answer->id,
+                    'data' => [
+                        'actor' => $request->user()->name,
+                        'content_body' => Str::limit($answer->body, 120),
+                    ],
+                ]);
+            }
+            if ($answer->content_type === 'comment') {
+                Notification::create([
+                    'user_id' => $content->user_id,
+                    'type' => 'answer',
+                    'interaction_type' => 'answer',
+                    'data' => [
+                        'actor' => $request->user()->name,
+                        'content_id' => $answer->id,
+                        'content_body' => Str::limit($answer->body, 120),
+                        
+                    ],
+                ]);
+
+                Activity::create([
+                    'user_id' => $request->user()->id,
+                    'type' => 'answer',
+                    'interaction_type' => 'answer',
+                    'content_id' => $answer->id,
+                    'data' => [
+                        'actor' => $request->user()->name,
+                        'content_body' => Str::limit($answer->body, 120),
+                        
+                    ],
+                ]);
+            }
             DB::commit();
             return response()->json(['message' => 'Answer added successfully', 'payload' => $answer], 201);
         } catch (\Throwable $th) {
