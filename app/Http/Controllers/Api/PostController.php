@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Events\NotificationCreated;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\CreatePostRequest;
 use App\Models\Activity;
@@ -125,14 +126,14 @@ class PostController extends Controller
             $oppositeReaction->update([
                 'type' => $validated['type']
             ]);
-            Notification::create([
+            $notification = Notification::create([
                 'user_id' => $content->user_id,
                 'type' => $notificationType,
                 'interaction_type' => 'reaction',
                 'reaction_type' => $validated['type'],
+                'content_id' => $content->id,
                 'data' => [
                     'actor' => $request->user()->name,
-                    'content_id' => $content->id,
                     'content_body' => Str::limit($content->body, 120),
                     
                 ],
@@ -150,6 +151,7 @@ class PostController extends Controller
                     
                 ],
             ]);
+            broadcast(new NotificationCreated($notification))->toOthers();
             return response()->json(['message' => 'Reaction switched']);
         }
 
@@ -159,14 +161,14 @@ class PostController extends Controller
             'type' => $validated['type'],
         ]);
 
-        Notification::create([
+        $notification = Notification::create([
             'user_id' => $content->user_id,
             'type' => $notificationType,
             'interaction_type' => 'reaction',
             'reaction_type' => $validated['type'],
+            'content_id' => $content->id,
             'data' => [
                 'actor' => $request->user()->name,
-                'content_id' => $content->id,
                 'content_body' => Str::limit($content->body, 120),  
             ],
         ]);
@@ -182,6 +184,7 @@ class PostController extends Controller
                 
             ],
         ]);
+        broadcast(new NotificationCreated($notification))->toOthers();
         return response()->json([
             'message' => 'Added',
             'payload' => $newReaction
@@ -208,13 +211,13 @@ class PostController extends Controller
                 'slug' =>  Str::slug( 'answer-' . uniqid()),
             ]);
             if ($answer->content_type === 'answer') {
-                Notification::create([
+                $notification = Notification::create([
                     'user_id' => $content->user_id,
                     'type' => 'question',
                     'interaction_type' => 'answer',
+                    'content_id' => $answer->id,
                     'data' => [
                         'actor' => $request->user()->name,
-                        'content_id' => $answer->id,
                         'content_body' => Str::limit($answer->body, 120),
                     ],
                 ]);
@@ -228,15 +231,16 @@ class PostController extends Controller
                         'content_body' => Str::limit($answer->body, 120),
                     ],
                 ]);
+                broadcast(new NotificationCreated($notification))->toOthers();
             }
             if ($answer->content_type === 'comment') {
-                Notification::create([
+                $notification = Notification::create([
                     'user_id' => $content->user_id,
                     'type' => 'answer',
                     'interaction_type' => 'answer',
+                    'content_id' => $answer->id,
                     'data' => [
                         'actor' => $request->user()->name,
-                        'content_id' => $answer->id,
                         'content_body' => Str::limit($answer->body, 120),
                         
                     ],
@@ -253,6 +257,7 @@ class PostController extends Controller
                         
                     ],
                 ]);
+                broadcast(new NotificationCreated($notification))->toOthers();
             }
             DB::commit();
             return response()->json(['message' => 'Answer added successfully', 'payload' => $answer], 201);

@@ -12,6 +12,7 @@ class Notification extends Model
         'type',
         'interaction_type',
         'reaction_type',
+        'content_id',
         'data',
         'read_at',
     ];
